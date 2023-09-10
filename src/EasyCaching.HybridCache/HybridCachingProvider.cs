@@ -255,43 +255,31 @@
         public CacheValue<T> Get<T>(string cacheKey)
         {
             ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
-
-            var cacheValue = _localCache.Get<T>(cacheKey);
-
-            if (cacheValue.HasValue)
-            {
-                return cacheValue;
-            }
-
-            LogMessage($"local cache can not get the value of {cacheKey}");
-
-            // Circuit Breaker may be more better
-            try
-            {
-                cacheValue = _distributedCache.Get<T>(cacheKey);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"distributed cache get error, [{cacheKey}]", ex);
-
-                if (_options.ThrowIfDistributedCacheError)
+            // TODO: 因為 lock 設計在 Get 裡面，但 Get 需要 expiration 所以一樣會有踩踏問題，只是變成踩 PTTL
+            //       除非 expiration 在 Get 裡面取得 (確定有 cache value 之後才取得) => expirationRetriever
+            //       直接傳入 expiration 等效於 expirationRetriever = () => expiration; 可以共用 base
+            //       但這有 async 問題，async 下，直接傳入 expiration 是 sync，但需要延後取得 expiration 是 async。
+            //       不過確實可以用 Task.FromResult(expiration); 來強制變成 async 界面
+            //       https://github.com/dotnetcore/EasyCaching/pull/480/files#diff-d8769ba5cc06870491bb7918cb090bcfc19e1f9b56b545e8c023063bbf67c259L166
+            TimeSpan ts = GetExpiration(cacheKey);
+            var result = _localCache.Get(
+                cacheKey,
+                () =>
                 {
-                    throw;
-                }
-            }
-
-            if (cacheValue.HasValue)
-            {
-                TimeSpan ts = GetExpiration(cacheKey);
-
-                _localCache.Set(cacheKey, cacheValue.Value, ts);
-
-                return cacheValue;
-            }
-
-            LogMessage($"distributed cache can not get the value of {cacheKey}");
-
-            return CacheValue<T>.NoValue;
+                    var value = default(T);
+                    try
+                    {
+                        value = _distributedCache.Get<T>(cacheKey).Value;
+                    }
+                    catch (Exception ex)
+                    {
+                        LogMessage($"distributed cache get error, [{cacheKey}]", ex);
+                        if (_options.ThrowIfDistributedCacheError)
+                            throw;
+                    }
+                    return value;
+                }, ts);
+            return result;
         }
 
         /// <summary>
