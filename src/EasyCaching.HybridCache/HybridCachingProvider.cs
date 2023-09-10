@@ -261,7 +261,6 @@
             //       但這有 async 問題，async 下，直接傳入 expiration 是 sync，但需要延後取得 expiration 是 async。
             //       不過確實可以用 Task.FromResult(expiration); 來強制變成 async 界面
             //       https://github.com/dotnetcore/EasyCaching/pull/480/files#diff-d8769ba5cc06870491bb7918cb090bcfc19e1f9b56b545e8c023063bbf67c259L166
-            TimeSpan ts = GetExpiration(cacheKey);
             var result = _localCache.Get(
                 cacheKey,
                 () =>
@@ -278,7 +277,8 @@
                             throw;
                     }
                     return value;
-                }, ts);
+                },
+                () => GetExpiration(cacheKey));
             return result;
         }
 
@@ -292,42 +292,26 @@
         public async Task<CacheValue<T>> GetAsync<T>(string cacheKey, CancellationToken cancellationToken = default)
         {
             ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
-
-            var cacheValue = await _localCache.GetAsync<T>(cacheKey, cancellationToken);
-
-            if (cacheValue.HasValue)
-            {
-                return cacheValue;
-            }
-
-            LogMessage($"local cache can not get the value of {cacheKey}");
-
-            try
-            {
-                cacheValue = await _distributedCache.GetAsync<T>(cacheKey, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"distributed cache get error, [{cacheKey}]", ex);
-
-                if (_options.ThrowIfDistributedCacheError)
+            var result = await _localCache.GetAsync(
+                cacheKey,
+                async () =>
                 {
-                    throw;
-                }
-            }
-
-            if (cacheValue.HasValue)
-            {
-                TimeSpan ts = await GetExpirationAsync(cacheKey, cancellationToken);
-
-                await _localCache.SetAsync(cacheKey, cacheValue.Value, ts, cancellationToken);
-
-                return cacheValue;
-            }
-
-            LogMessage($"distributed cache can not get the value of {cacheKey}");
-
-            return CacheValue<T>.NoValue;
+                    var value = default(T);
+                    try
+                    {
+                        value = (await _distributedCache.GetAsync<T>(cacheKey, cancellationToken)).Value;
+                    }
+                    catch (Exception ex)
+                    {
+                        LogMessage($"distributed cache get error, [{cacheKey}]", ex);
+                        if (_options.ThrowIfDistributedCacheError)
+                            throw;
+                    }
+                    return value;
+                },
+                () => GetExpirationAsync(cacheKey, cancellationToken),
+                cancellationToken);
+            return result;
         }
 
         /// <summary>
@@ -687,7 +671,20 @@
         {
             ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
             ArgumentCheck.NotNegativeOrZero(expiration, nameof(expiration));
-            TimeSpan ts = GetExpiration(cacheKey);
+            return Get(cacheKey, dataRetriever, () => expiration);
+        }
+
+        /// <summary>
+        /// Get the specified cacheKey, dataRetriever and expirationRetriever.
+        /// </summary>
+        /// <returns>The get.</returns>
+        /// <param name="cacheKey">Cache key.</param>
+        /// <param name="dataRetriever">Data retriever.</param>
+        /// <param name="expirationRetriever">Expiration retriever.</param>
+        /// <typeparam name="T">The 1st type parameter.</typeparam>
+        public CacheValue<T> Get<T>(string cacheKey, Func<T> dataRetriever, Func<TimeSpan> expirationRetriever)
+        {
+            ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
             var result = _localCache.Get(
                 cacheKey,
                 () =>
@@ -695,7 +692,7 @@
                     var value = default(T);
                     try
                     {
-                        value = _distributedCache.Get(cacheKey, dataRetriever, expiration).Value;
+                        value = _distributedCache.Get(cacheKey, dataRetriever, expirationRetriever).Value;
                     }
                     catch (Exception ex)
                     {
@@ -704,7 +701,8 @@
                             throw;
                     }
                     return value;
-                }, ts);
+                },
+                () => GetExpiration(cacheKey));
             return result;
         }
 
@@ -721,38 +719,76 @@
         {
             ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
             ArgumentCheck.NotNegativeOrZero(expiration, nameof(expiration));
+            return await GetAsync(cacheKey, dataRetriever, () => Task.FromResult(expiration), cancellationToken);
+        }
 
-            var result = await _localCache.GetAsync<T>(cacheKey, cancellationToken);
-
-            if (result.HasValue)
-            {
-                return result;
-            }
-
-            try
-            {
-                result = await _distributedCache.GetAsync<T>(cacheKey, dataRetriever, expiration, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"get async with data retriever from distributed provider error [{cacheKey}]", ex);
-
-                if (_options.ThrowIfDistributedCacheError)
+        /// <summary>
+        /// Gets the specified cacheKey, dataRetriever and expirationRetriever async.
+        /// </summary>
+        /// <returns>The async.</returns>
+        /// <param name="cacheKey">Cache key.</param>
+        /// <param name="dataRetriever">Data retriever.</param>
+        /// <param name="expirationRetriever">Expiration retriever.</param>
+        /// <param name="cancellationToken"></param>
+        /// <typeparam name="T">The 1st type parameter.</typeparam>
+        public async Task<CacheValue<T>> GetAsync<T>(string cacheKey, Func<Task<T>> dataRetriever, Func<Task<TimeSpan>> expirationRetriever, CancellationToken cancellationToken = default)
+        {
+            ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
+            var result = await _localCache.GetAsync(
+                cacheKey,
+                async () =>
                 {
-                    throw;
-                }
-            }
+                    var value = default(T);
+                    try
+                    {
+                        value = (await _distributedCache.GetAsync(cacheKey, dataRetriever, expirationRetriever, cancellationToken)).Value;
+                    }
+                    catch (Exception ex)
+                    {
+                        LogMessage($"get async with data retriever from distributed provider error [{cacheKey}]", ex);
+                        if (_options.ThrowIfDistributedCacheError)
+                            throw;
+                    }
+                    return value;
+                },
+                () => GetExpirationAsync(cacheKey, cancellationToken),
+                cancellationToken);
+            return result;
+        }
 
-            if (result.HasValue)
-            {
-                TimeSpan ts = await GetExpirationAsync(cacheKey, cancellationToken);
-
-                await _localCache.SetAsync(cacheKey, result.Value, ts, cancellationToken);
-
-                return result;
-            }
-
-            return CacheValue<T>.NoValue;
+        /// <summary>
+        /// Gets the specified cacheKey, type, dataRetriever and expirationRetriever async.
+        /// </summary>
+        /// <returns>The async.</returns>
+        /// <param name="cacheKey">Cache key.</param>
+        /// <param name="type">Object Type.</param>
+        /// <param name="dataRetriever">Data retriever.</param>
+        /// <param name="expirationRetriever">Expiration retriever.</param>
+        /// <param name="cancellationToken"></param>
+        public async Task<object> GetAsync(string cacheKey, Type type, Func<Task<object>> dataRetriever, Func<Task<TimeSpan>> expirationRetriever, CancellationToken cancellationToken = default)
+        {
+            ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
+            var result = await _localCache.GetAsync(
+                cacheKey,
+                type,
+                async () =>
+                {
+                    object value = null;
+                    try
+                    {
+                        value = await _distributedCache.GetAsync(cacheKey, type, dataRetriever, expirationRetriever, cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        LogMessage($"get async with data retriever from distributed provider error [{cacheKey}]", ex);
+                        if (_options.ThrowIfDistributedCacheError)
+                            throw;
+                    }
+                    return value;
+                },
+                () => GetExpirationAsync(cacheKey, cancellationToken),
+                cancellationToken);
+            return result;
         }
 
         /// <summary>
@@ -936,6 +972,29 @@
 
         public async Task<object> GetAsync(string cacheKey, Type type, CancellationToken cancellationToken = default)
         {
+            ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
+            var result = await _localCache.GetAsync(
+                cacheKey,
+                type,
+                async () =>
+                {
+                    object value = null;
+                    try
+                    {
+                        value = await _distributedCache.GetAsync(cacheKey, type, cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        LogMessage($"distributed cache get error, [{cacheKey}]", ex);
+                        if (_options.ThrowIfDistributedCacheError)
+                            throw;
+                    }
+                    return value;
+                },
+                () => GetExpirationAsync(cacheKey, cancellationToken),
+                cancellationToken);
+            return result;
+
             ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
 
             var cacheValue = await _localCache.GetAsync(cacheKey, type, cancellationToken);

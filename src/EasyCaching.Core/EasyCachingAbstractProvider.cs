@@ -184,6 +184,55 @@ namespace EasyCaching.Core
             }
         }
 
+        public CacheValue<T> Get<T>(string cacheKey, Func<T> dataRetriever, Func<TimeSpan> expirationRetriever)
+        {
+            var operationId = s_diagnosticListener.WriteGetCacheBefore(new BeforeGetRequestEventData(CachingProviderType.ToString(), Name, nameof(Get), new[] { cacheKey }, expiration));
+            Exception e = null;
+            try
+            {
+                if (_lockFactory == null) return BaseGet<T>(cacheKey, dataRetriever, expirationRetriever);
+
+                var value = BaseGet<T>(cacheKey);
+                if (value.HasValue) return value;
+
+                using (var @lock = _lockFactory.CreateLock(Name, $"{cacheKey}_Lock"))
+                {
+                    if (!@lock.Lock(_options.SleepMs)) throw new TimeoutException();
+
+                    value = BaseGet<T>(cacheKey);
+                    if (value.HasValue) return value;
+
+                    var item = dataRetriever();
+                    if (item != null || _options.CacheNulls)
+                    {
+                        BaseSet(cacheKey, item, expiration);
+
+                        return new CacheValue<T>(item, true);
+                    }
+                    else
+                    {
+                        return CacheValue<T>.NoValue;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteGetCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteGetCacheAfter(operationId);
+                }
+            }
+        }
+
         public CacheValue<T> Get<T>(string cacheKey, Func<T> dataRetriever, TimeSpan expiration)
         {
             var operationId = s_diagnosticListener.WriteGetCacheBefore(new BeforeGetRequestEventData(CachingProviderType.ToString(), Name, nameof(Get), new[] { cacheKey }, expiration));
@@ -361,6 +410,16 @@ namespace EasyCaching.Core
                     s_diagnosticListener.WriteGetCacheAfter(operationId);
                 }
             }
+        }
+
+        public Task<CacheValue<T>> GetAsync<T>(string cacheKey, Func<Task<T>> dataRetriever, Func<Task<TimeSpan>> expirationRetriever, CancellationToken cancellationToken = default)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task<object> GetAsync(string cacheKey, Type type, Func<Task<object>> dataRetriever, Func<Task<TimeSpan>> expirationRetriever, CancellationToken cancellationToken = default)
+        {
+            throw new NotImplementedException();
         }
 
         public async Task<CacheValue<T>> GetAsync<T>(string cacheKey, Func<Task<T>> dataRetriever, TimeSpan expiration, CancellationToken cancellationToken = default)
@@ -947,6 +1006,6 @@ namespace EasyCaching.Core
         protected string HandleSearchKeyPattern(string pattern)
         {
             return pattern.Replace("*", string.Empty);
-        } 
+        }
     }
 }

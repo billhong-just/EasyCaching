@@ -143,6 +143,16 @@ namespace EasyCaching.Core
         CacheValue<T> Get<T>(string cacheKey, Func<T> dataRetriever, TimeSpan expiration);
 
         /// <summary>
+        /// Get the specified cacheKey, dataRetriever and expirationRetriever.
+        /// </summary>
+        /// <returns>The get.</returns>
+        /// <param name="cacheKey">Cache key.</param>
+        /// <param name="dataRetriever">Data retriever.</param>
+        /// <param name="expirationRetriever">Expiration retriever.</param>
+        /// <typeparam name="T">The 1st type parameter.</typeparam>
+        CacheValue<T> Get<T>(string cacheKey, Func<T> dataRetriever, Func<TimeSpan> expirationRetriever);
+
+        /// <summary>
         /// Gets the specified cacheKey, dataRetriever and expiration async.
         /// </summary>
         /// <returns>The async.</returns>
@@ -152,6 +162,28 @@ namespace EasyCaching.Core
         /// <param name="cancellationToken"></param>
         /// <typeparam name="T">The 1st type parameter.</typeparam>
         Task<CacheValue<T>> GetAsync<T>(string cacheKey, Func<Task<T>> dataRetriever, TimeSpan expiration, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Gets the specified cacheKey, dataRetriever and expirationRetriever async.
+        /// </summary>
+        /// <returns>The async.</returns>
+        /// <param name="cacheKey">Cache key.</param>
+        /// <param name="dataRetriever">Data retriever.</param>
+        /// <param name="expirationRetriever">Expiration retriever.</param>
+        /// <param name="cancellationToken"></param>
+        /// <typeparam name="T">The 1st type parameter.</typeparam>
+        Task<CacheValue<T>> GetAsync<T>(string cacheKey, Func<Task<T>> dataRetriever, Func<Task<TimeSpan>> expirationRetriever, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Gets the specified cacheKey, type, dataRetriever and expirationRetriever async.
+        /// </summary>
+        /// <returns>The async.</returns>
+        /// <param name="cacheKey">Cache key.</param>
+        /// <param name="type">Object Type.</param>
+        /// <param name="dataRetriever">Data retriever.</param>
+        /// <param name="expirationRetriever">Expiration retriever.</param>
+        /// <param name="cancellationToken"></param>
+        Task<object> GetAsync(string cacheKey, Type type, Func<Task<object>> dataRetriever, Func<Task<TimeSpan>> expirationRetriever, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Removes cached item by cachekey's prefix.
