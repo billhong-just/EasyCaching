@@ -687,38 +687,25 @@
         {
             ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
             ArgumentCheck.NotNegativeOrZero(expiration, nameof(expiration));
-
-            var result = _localCache.Get<T>(cacheKey);
-
-            if (result.HasValue)
-            {
-                return result;
-            }
-
-            try
-            {
-                result = _distributedCache.Get<T>(cacheKey, dataRetriever, expiration);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"get with data retriever from distributed provider error [{cacheKey}]", ex);
-
-                if (_options.ThrowIfDistributedCacheError)
+            TimeSpan ts = GetExpiration(cacheKey);
+            var result = _localCache.Get(
+                cacheKey,
+                () =>
                 {
-                    throw;
-                }
-            }
-
-            if (result.HasValue)
-            {
-                TimeSpan ts = GetExpiration(cacheKey);
-
-                _localCache.Set(cacheKey, result.Value, ts);
-
-                return result;
-            }
-
-            return CacheValue<T>.NoValue;
+                    var value = default(T);
+                    try
+                    {
+                        value = _distributedCache.Get(cacheKey, dataRetriever, expiration).Value;
+                    }
+                    catch (Exception ex)
+                    {
+                        LogMessage($"get with data retriever from distributed provider error [{cacheKey}]", ex);
+                        if (_options.ThrowIfDistributedCacheError)
+                            throw;
+                    }
+                    return value;
+                }, ts);
+            return result;
         }
 
         /// <summary>
