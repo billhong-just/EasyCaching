@@ -54,6 +54,7 @@ namespace EasyCaching.Core
         public abstract IDictionary<string, CacheValue<T>> BaseGetAll<T>(IEnumerable<string> cacheKeys);
         public abstract Task<IDictionary<string, CacheValue<T>>> BaseGetAllAsync<T>(IEnumerable<string> cacheKeys, CancellationToken cancellationToken = default);
         public abstract Task<CacheValue<T>> BaseGetAsync<T>(string cacheKey, Func<Task<T>> dataRetriever, TimeSpan expiration, CancellationToken cancellationToken = default);
+        public abstract Task<CacheValue<T>> BaseGetAsync<T>(string cacheKey, Func<Task<T>> dataRetriever, Func<Task<TimeSpan>> expirationRetriever, CancellationToken cancellationToken = default);
         public abstract Task<object> BaseGetAsync(string cacheKey, Type type, CancellationToken cancellationToken = default);
         public abstract Task<CacheValue<T>> BaseGetAsync<T>(string cacheKey, CancellationToken cancellationToken = default);
         public abstract IDictionary<string, CacheValue<T>> BaseGetByPrefix<T>(string prefix);
@@ -344,6 +345,66 @@ namespace EasyCaching.Core
             try
             {
                 return await BaseGetAllAsync<T>(cacheKeys, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                e = ex;
+                throw;
+            }
+            finally
+            {
+                if (e != null)
+                {
+                    s_diagnosticListener.WriteGetCacheError(operationId, e);
+                }
+                else
+                {
+                    s_diagnosticListener.WriteGetCacheAfter(operationId);
+                }
+            }
+        }
+
+        public async Task<CacheValue<T>> GetAsync<T>(string cacheKey, Func<Task<T>> dataRetriever, Func<Task<TimeSpan>> expirationRetriever, CancellationToken cancellationToken = default)
+        {
+            var operationId = s_diagnosticListener.WriteGetCacheBefore(new BeforeGetRequestEventData(CachingProviderType.ToString(), Name, nameof(GetAsync), new[] { cacheKey }));
+            Exception e = null;
+            try
+            {
+                if (_lockFactory == null) return await BaseGetAsync<T>(cacheKey, dataRetriever, expirationRetriever, cancellationToken);
+
+                var value = await BaseGetAsync<T>(cacheKey, cancellationToken);
+                if (value.HasValue) return value;
+
+                var @lock = _lockFactory.CreateLock(Name, $"{cacheKey}_Lock");
+                try
+                {
+                    if (!await @lock.LockAsync(_options.SleepMs, cancellationToken)) throw new TimeoutException();
+
+                    value = await BaseGetAsync<T>(cacheKey, cancellationToken);
+                    if (value.HasValue) return value;
+
+                    var task = dataRetriever();
+                    if (!task.IsCompleted &&
+                        await Task.WhenAny(task, Task.Delay(_options.LockMs, cancellationToken)) != task)
+                        throw new TimeoutException();
+
+                    var item = await task;
+                    if (item != null || _options.CacheNulls)
+                    {
+                        TimeSpan expiration = await expirationRetriever();
+                        await BaseSetAsync(cacheKey, item, expiration, cancellationToken);
+
+                        return new CacheValue<T>(item, true);
+                    }
+                    else
+                    {
+                        return CacheValue<T>.NoValue;
+                    }
+                }
+                finally
+                {
+                    await @lock.DisposeAsync();
+                }
             }
             catch (Exception ex)
             {

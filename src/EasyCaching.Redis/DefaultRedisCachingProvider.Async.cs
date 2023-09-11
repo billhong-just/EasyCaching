@@ -103,6 +103,53 @@
             }
         }
 
+        public override async Task<CacheValue<T>> BaseGetAsync<T>(string cacheKey, Func<Task<T>> dataRetriever, Func<Task<TimeSpan>> expirationRetriever, CancellationToken cancellationToken = default)
+        {
+            ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
+
+            var result = await _cache.StringGetAsync(cacheKey);
+            if (!result.IsNull)
+            {
+                CacheStats.OnHit();
+
+                if (_options.EnableLogging)
+                    _logger?.LogInformation($"Cache Hit : cachekey = {cacheKey}");
+
+                var value = _serializer.Deserialize<T>(result);
+                return new CacheValue<T>(value, true);
+            }
+
+            CacheStats.OnMiss();
+
+            if (_options.EnableLogging)
+                _logger?.LogInformation($"Cache Missed : cachekey = {cacheKey}");
+
+            var flag = await _cache.StringSetAsync($"{cacheKey}_Lock", 1, TimeSpan.FromMilliseconds(_options.LockMs), When.NotExists);
+
+            if (!flag)
+            {
+                await Task.Delay(_options.SleepMs, cancellationToken);
+                return await GetAsync(cacheKey, dataRetriever, expirationRetriever, cancellationToken);
+            }
+
+            var item = await dataRetriever();
+            if (item != null || _options.CacheNulls)
+            {
+                TimeSpan expiration = await expirationRetriever();
+                await SetAsync(cacheKey, item, expiration, cancellationToken);
+
+                //remove mutex key
+                await _cache.KeyDeleteAsync($"{cacheKey}_Lock");
+                return new CacheValue<T>(item, true);
+            }
+            else
+            {
+                //remove mutex key
+                await _cache.KeyDeleteAsync($"{cacheKey}_Lock");
+                return CacheValue<T>.NoValue;
+            }
+        }
+
         /// <summary>
         /// Gets the specified cacheKey async.
         /// </summary>

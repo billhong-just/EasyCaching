@@ -10,7 +10,11 @@
     using Microsoft.Extensions.Logging;
 
     public partial class DefaultDiskCachingProvider : EasyCachingAbstractProvider
-    {   
+    {
+        public override async Task<CacheValue<T>> BaseGetAsync<T>(string cacheKey, Func<Task<T>> dataRetriever, Func<Task<TimeSpan>> expirationRetriever, CancellationToken cancellationToken = default)
+        {
+            throw new NotImplementedException();
+        }
         public override async Task<bool> BaseExistsAsync(string cacheKey, CancellationToken cancellationToken = default)
         {
             ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));

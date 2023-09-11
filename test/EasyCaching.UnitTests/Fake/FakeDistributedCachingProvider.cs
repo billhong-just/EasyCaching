@@ -205,5 +205,10 @@
         {
             return Task.FromResult(true);
         }
+
+        public Task<CacheValue<T>> GetAsync<T>(string cacheKey, Func<Task<T>> dataRetriever, Func<Task<TimeSpan>> expirationRetriever, CancellationToken cancellationToken = default)
+        {
+            throw new NotImplementedException();
+        }
     }
 }

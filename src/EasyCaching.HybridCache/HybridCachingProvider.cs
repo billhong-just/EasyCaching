@@ -304,42 +304,26 @@
         public async Task<CacheValue<T>> GetAsync<T>(string cacheKey, CancellationToken cancellationToken = default)
         {
             ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
-
-            var cacheValue = await _localCache.GetAsync<T>(cacheKey, cancellationToken);
-
-            if (cacheValue.HasValue)
-            {
-                return cacheValue;
-            }
-
-            LogMessage($"local cache can not get the value of {cacheKey}");
-
-            try
-            {
-                cacheValue = await _distributedCache.GetAsync<T>(cacheKey, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"distributed cache get error, [{cacheKey}]", ex);
-
-                if (_options.ThrowIfDistributedCacheError)
+            var result = await _localCache.GetAsync(
+                cacheKey,
+                async () =>
                 {
-                    throw;
-                }
-            }
-
-            if (cacheValue.HasValue)
-            {
-                TimeSpan ts = await GetExpirationAsync(cacheKey, cancellationToken);
-
-                await _localCache.SetAsync(cacheKey, cacheValue.Value, ts, cancellationToken);
-
-                return cacheValue;
-            }
-
-            LogMessage($"distributed cache can not get the value of {cacheKey}");
-
-            return CacheValue<T>.NoValue;
+                    var value = default(T);
+                    try
+                    {
+                        value = (await _distributedCache.GetAsync<T>(cacheKey, cancellationToken)).Value;
+                    }
+                    catch (Exception ex)
+                    {
+                        LogMessage($"distributed cache get error, [{cacheKey}]", ex);
+                        if (_options.ThrowIfDistributedCacheError)
+                            throw;
+                    }
+                    return value;
+                },
+                () => GetExpirationAsync(cacheKey, cancellationToken),
+                cancellationToken);
+            return result;
         }
 
         /// <summary>
@@ -778,6 +762,21 @@
             }
 
             return CacheValue<T>.NoValue;
+        }
+
+        /// <summary>
+        /// Gets the specified cacheKey, dataRetriever and expirationRetriever async.
+        /// </summary>
+        /// <returns>The async.</returns>
+        /// <param name="cacheKey">Cache key.</param>
+        /// <param name="dataRetriever">Data retriever.</param>
+        /// <param name="expirationRetriever">Expiration retriever.</param>
+        /// <param name="cancellationToken"></param>
+        /// <typeparam name="T">The 1st type parameter.</typeparam>
+        public async Task<CacheValue<T>> GetAsync<T>(string cacheKey, Func<Task<T>> dataRetriever, Func<Task<TimeSpan>> expirationRetriever, CancellationToken cancellationToken = default)
+        {
+            // TiSvc 沒用到，不實作
+            throw new NotImplementedException();
         }
 
         /// <summary>

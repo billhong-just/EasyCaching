@@ -13,6 +13,10 @@
     /// </summary>
     public partial class DefaultMemcachedCachingProvider : EasyCachingAbstractProvider
     {
+        public override async Task<CacheValue<T>> BaseGetAsync<T>(string cacheKey, Func<Task<T>> dataRetriever, Func<Task<TimeSpan>> expirationRetriever, CancellationToken cancellationToken = default)
+        {
+            throw new NotImplementedException();
+        }
         /// <summary>
         /// Gets the specified cacheKey, dataRetriever and expiration async.
         /// </summary>

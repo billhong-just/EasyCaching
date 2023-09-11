@@ -154,6 +154,17 @@ namespace EasyCaching.Core
         Task<CacheValue<T>> GetAsync<T>(string cacheKey, Func<Task<T>> dataRetriever, TimeSpan expiration, CancellationToken cancellationToken = default);
 
         /// <summary>
+        /// Gets the specified cacheKey, dataRetriever and expirationRetriever async.
+        /// </summary>
+        /// <returns>The async.</returns>
+        /// <param name="cacheKey">Cache key.</param>
+        /// <param name="dataRetriever">Data retriever.</param>
+        /// <param name="expirationRetriever">Expiration retriever.</param>
+        /// <param name="cancellationToken"></param>
+        /// <typeparam name="T">The 1st type parameter.</typeparam>
+        Task<CacheValue<T>> GetAsync<T>(string cacheKey, Func<Task<T>> dataRetriever, Func<Task<TimeSpan>> expirationRetriever, CancellationToken cancellationToken = default);
+
+        /// <summary>
         /// Removes cached item by cachekey's prefix.
         /// </summary>
         /// <param name="prefix">Prefix of CacheKey.</param>
