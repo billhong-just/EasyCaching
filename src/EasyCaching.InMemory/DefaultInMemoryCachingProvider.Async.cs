@@ -79,30 +79,17 @@
         public override async Task<CacheValue<T>> BaseGetAsync<T>(string cacheKey, Func<Task<T>> dataRetriever, Func<Task<TimeSpan>> expirationRetriever, CancellationToken cancellationToken = default)
         {
             ArgumentCheck.NotNullOrWhiteSpace(cacheKey, nameof(cacheKey));
-
-            var result = _cache.Get<T>(cacheKey);
-            if (result.HasValue)
+            bool getLock = false;
+            do
             {
-                if (_options.EnableLogging)
-                    _logger?.LogInformation($"Cache Hit : cachekey = {cacheKey}");
-
-                CacheStats.OnHit();
-
-                return result;
+                var result = _cache.Get<T>(cacheKey);
+                if (result.HasValue)
+                    return result;
+                getLock = _cache.Add($"{cacheKey}_Lock", 1, TimeSpan.FromMilliseconds(_options.LockMs));
+                if (!getLock)
+                    await Task.Delay(_options.SleepMs, cancellationToken);
             }
-
-            CacheStats.OnMiss();
-
-            if (_options.EnableLogging)
-                _logger?.LogInformation($"Cache Missed : cachekey = {cacheKey}");
-
-            if (!_cache.Add($"{cacheKey}_Lock", 1, TimeSpan.FromMilliseconds(_options.LockMs)))
-            {
-                //wait for some ms
-                await Task.Delay(_options.SleepMs, cancellationToken);
-                return await GetAsync(cacheKey, dataRetriever, expirationRetriever, cancellationToken);
-            }
-
+            while (!getLock);
             try
             {
                 var res = await dataRetriever();
