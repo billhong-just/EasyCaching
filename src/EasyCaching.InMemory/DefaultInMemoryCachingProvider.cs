@@ -117,27 +117,30 @@
             ////mutex key
             //Lock(cacheKey);
 
-            var result = _cache.Get<T>(cacheKey);
-            if (result.HasValue)
+            bool getLock;
+            do
             {
+                var result = _cache.Get<T>(cacheKey);
+                if (result.HasValue)
+                {
+                    if (_options.EnableLogging)
+                        _logger?.LogInformation($"Cache Hit : cachekey = {cacheKey}");
+
+                    CacheStats.OnHit();
+
+                    return result;
+                }
+
+                CacheStats.OnMiss();
+
                 if (_options.EnableLogging)
-                    _logger?.LogInformation($"Cache Hit : cachekey = {cacheKey}");
+                    _logger?.LogInformation($"Cache Missed : cachekey = {cacheKey}");
 
-                CacheStats.OnHit();
-
-                return result;
+                getLock = _cache.Add($"{cacheKey}_Lock", 1, TimeSpan.FromMilliseconds(_options.LockMs));
+                if (!getLock)
+                    System.Threading.Thread.Sleep(_options.SleepMs);
             }
-
-            CacheStats.OnMiss();
-
-            if (_options.EnableLogging)
-                _logger?.LogInformation($"Cache Missed : cachekey = {cacheKey}");
-
-            if (!_cache.Add($"{cacheKey}_Lock", 1, TimeSpan.FromMilliseconds(_options.LockMs)))
-            {
-                System.Threading.Thread.Sleep(_options.SleepMs);
-                return Get(cacheKey, dataRetriever, expiration);
-            }
+            while (!getLock);
 
             try
             {
