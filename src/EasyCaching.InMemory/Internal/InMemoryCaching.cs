@@ -207,6 +207,34 @@
                     Interlocked.Increment(ref _cacheSize);
             }
 
+            if (addOnly)
+            {
+                if (_memory.TryAdd(deep.Key, deep))
+                {
+                    if (_options.SizeLimit.HasValue)
+                        Interlocked.Increment(ref _cacheSize);
+                }
+                else
+                {
+                    if (!_memory.TryGetValue(deep.Key, out var existingEntry) || existingEntry.ExpiresAt >= SystemClock.UtcNow)
+                        return false;
+
+                    _memory.AddOrUpdate(deep.Key, deep, (k, cacheEntry) => deep);
+
+                }
+            }
+            // add (cacheSize 遞增) or update (cacheSize 不變)
+            else
+            {
+                if (_memory.TryAdd(deep.Key, deep))
+                {
+                    if (_options.SizeLimit.HasValue)
+                        Interlocked.Increment(ref _cacheSize);
+                }
+                else
+                    _memory.AddOrUpdate(deep.Key, deep, (k, cacheEntry) => deep);
+            }
+
             StartScanForExpiredItems();
 
             return true;
